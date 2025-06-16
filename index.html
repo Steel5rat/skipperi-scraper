@@ -119,10 +119,6 @@
 <body>    <div class="container">
         <div class="map-container">
             <div id="map"></div>
-              <div class="controls">
-                <button class="control-button" onclick="clearVesselMarkers()">🗑️ Clear Boats</button>
-                <button class="control-button" onclick="clearAllMarkers()">❌ Clear All</button>
-            </div>
               <div class="info-panel">
                 <strong>🗺️ Skipperi Boat Map</strong><br>
                 <small>Loading sailing boats from Skipperi.fi...</small><br>
@@ -221,6 +217,8 @@
                         if (vessel.prices.type === 'week') {
                             price = price / 7; // Convert to daily rate
                         }
+
+                        const img = `https://www.skipperi.fi${vessel['images'][0]['url']}`;
                         
                         const parsedVessel = {
                             lat: lat,
@@ -229,7 +227,8 @@
                             price: price,
                             name: vessel.name || 'Sailing Boat',
                             currency: currency,
-                            priceType: vessel.prices.type
+                            priceType: vessel.prices.type,
+                            img: img
                         };
                         
                         results.push(parsedVessel);
@@ -275,15 +274,16 @@
                         iconAnchor: [8, 8]
                     })
                 })
-                .addTo(map)
-                .bindPopup(`
-                    <div style="font-family: Arial, sans-serif; min-width: 200px;">
+                .addTo(map)                .bindPopup(`
+                    <div style="font-family: Arial, sans-serif; min-width: 250px; max-width: 300px;">
+                        <div style="margin-bottom: 10px;">
+                            <img src="${vessel.img}" alt="${vessel.name}" 
+                                 style="width: 100%; height: 150px; object-fit: cover; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);"
+                                 onerror="this.style.display='none';">
+                        </div>
                         <h4 style="margin: 0 0 10px 0; color: #2c3e50; font-size: 16px;">${vessel.name}</h4>
                         <p style="margin: 5px 0; font-size: 14px;">
                             <strong>💰 Base price:</strong> €${vessel.price.toFixed(2)}/${vessel.priceType === 'week' ? 'day' : vessel.priceType}
-                        </p>
-                        <p style="margin: 5px 0; font-size: 12px; color: #666;">
-                            <strong>📍 Location:</strong> ${vessel.lat.toFixed(4)}, ${vessel.lng.toFixed(4)}
                         </p>
                         <p style="margin: 10px 0 0 0;">
                             <a href="https://${vessel.link}" target="_blank" 
@@ -304,21 +304,6 @@
             }
         }
         
-        // Function to clear vessel markers only
-        function clearVesselMarkers() {
-            vesselMarkers.forEach(marker => map.removeLayer(marker));
-            vesselMarkers = [];
-            updateStatus('Vessel markers cleared', '');
-        }
-        
-        // Function to clear all markers
-        function clearAllMarkers() {
-            clickMarkers.forEach(marker => map.removeLayer(marker));
-            vesselMarkers.forEach(marker => map.removeLayer(marker));
-            clickMarkers = [];
-            vesselMarkers = [];
-            updateStatus('All markers cleared', '');
-        }
           // Add scale control
         L.control.scale().addTo(map);
         
