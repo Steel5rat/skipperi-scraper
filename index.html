@@ -3,35 +3,329 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sailing Yacht</title>
-    <style>
+    <title>OpenStreetMap Canvas</title>
+    
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+        crossorigin=""/>
+      <style>
         body {
-            background: #87CEEB;
-            font-family: 'Courier New', monospace;
             margin: 0;
-            padding: 20px;
-            text-align: center;
+            padding: 0;
+            font-family: Arial, sans-serif;
+            background-color: #f5f5f5;
+            height: 100vh;
+            overflow: hidden;
         }
         
-        .ascii-art {
+        .container {
+            width: 100%;
+            height: 100vh;
+            background-color: white;
+            overflow: hidden;
+        }
+        
+        .map-container {
+            position: relative;
+            width: 100%;
+            height: 100vh;
+        }
+        
+        #map {
+            height: 100vh;
+            width: 100%;
+        }        
+        .controls {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            z-index: 1000;
+            display: flex;
+            gap: 5px;
+            flex-direction: column;
+        }
+        
+        .control-button {
+            background-color: #3498db;
+            color: white;
+            border: none;
+            padding: 8px 12px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: background-color 0.3s;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        
+        .control-button:hover {
+            background-color: #2980b9;
+        }
+        
+        .control-button:disabled {
+            background-color: #95a5a6;
+            cursor: not-allowed;
+        }
+        
+        .info-panel {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            background-color: rgba(236, 240, 241, 0.95);
+            padding: 15px;
+            border-radius: 8px;
             font-size: 14px;
             color: #2c3e50;
-            white-space: pre;
+            z-index: 1000;
+            max-width: 300px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        }
+        
+        .coordinates {
+            font-family: monospace;
+            background-color: #34495e;
+            color: white;
+            padding: 3px 6px;
+            border-radius: 3px;
+            display: inline-block;
+            margin-top: 5px;
+            font-size: 10px;
+        }
+        
+        .status {
+            font-family: monospace;
+            background-color: #34495e;
+            color: white;
+            padding: 5px 8px;
+            border-radius: 3px;
+            display: inline-block;
+            margin-top: 8px;
+            font-size: 12px;
+        }
+        
+        .loading {
+            background-color: #f39c12 !important;
+        }
+        
+        .error {
+            background-color: #e74c3c !important;
+        }
+        
+        .success {
+            background-color: #27ae60 !important;
         }
     </style>
 </head>
-<body>
-    <div class="ascii-art">                    |    |    |               
-                    )_)  )_)  )_)              
-                   )___))___))___)\            
-                  )____)____)_____)\\          
-                _____|____|____|____\\\__      
-       ---------\                   /---------
-         ^^^^^ ^^^^^^^^^^^^^^^^^^^^^
-           ^^^^      ^^^^     ^^^    ^^
-                ^^^^      ^^^
-
-                  ⛵ Ahoy! ⛵
+<body>    <div class="container">
+        <div class="map-container">
+            <div id="map"></div>
+              <div class="controls">
+                <button class="control-button" onclick="clearVesselMarkers()">🗑️ Clear Boats</button>
+                <button class="control-button" onclick="clearAllMarkers()">❌ Clear All</button>
+            </div>
+              <div class="info-panel">
+                <strong>🗺️ Skipperi Boat Map</strong><br>
+                <small>Loading sailing boats from Skipperi.fi...</small><br>
+                <div class="status" id="status">
+                    Initializing...
+                </div>
+            </div>
+        </div>
     </div>
+
+    <!-- Leaflet JavaScript -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+        crossorigin=""></script>    <script>
+        // Initialize the map
+        let map = L.map('map').setView([60.1699, 24.9384], 8); // Centered on Helsinki, ~150km width
+        
+        // Add OpenStreetMap tile layer
+        let osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+            maxZoom: 19
+        }).addTo(map);
+          // Arrays to store different types of markers
+        let clickMarkers = [];
+        let vesselMarkers = [];
+        
+        // Status update function
+        function updateStatus(message, type = '') {
+            const statusEl = document.getElementById('status');
+            statusEl.textContent = message;
+            statusEl.className = 'status ' + type;
+        }
+        
+        // Function to get price percentiles for color coding
+        function getPricePercentiles(vessels) {
+            const prices = vessels.map(v => v.price).sort((a, b) => a - b);
+            return {
+                p25: prices[Math.floor(prices.length * 0.25)],
+                p50: prices[Math.floor(prices.length * 0.50)],
+                p75: prices[Math.floor(prices.length * 0.75)]
+            };
+        }
+        
+        // Function to get color based on price percentile
+        function getPriceColor(price, percentiles) {
+            if (price <= percentiles.p25) return '#27ae60'; // Green - lowest 25%
+            if (price <= percentiles.p50) return '#f1c40f'; // Yellow - 25-50%
+            if (price <= percentiles.p75) return '#e67e22'; // Orange - 50-75%
+            return '#e74c3c'; // Red - highest 25%
+        }
+          // Function to load vessels from Skipperi API
+        async function loadVessels() {
+            updateStatus('Loading vessels from Skipperi...', 'loading');
+            
+            const results = [];
+            let offset = 0;
+            let skippedBecauseNoPrice = 0;
+            
+            try {                while (true) {
+                    const urlTemplate = `https://www.skipperi.fi/api/boats?brand&capacity&club&country=all&keyword&location=&offset=${offset}&order&type=sailing_boat`;
+                    
+                    updateStatus(`Fetching page ${offset + 1}...`, 'loading');
+                    
+                    // Use public CORS proxy to bypass CORS restrictions
+                    const proxyUrl = `https://corsproxy.io/?url=${encodeURIComponent(urlTemplate)}`;
+                    const response = await fetch(proxyUrl);
+                      if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}`);
+                    }
+                    
+                    const data = await response.json();
+                    
+                    if (!data || !data.boats || data.boats.length === 0) {
+                        break;
+                    }
+                    
+                    for (const vessel of data.boats) {
+                        if (!vessel.prices) {
+                            skippedBecauseNoPrice++;
+                            continue;
+                        }
+                        
+                        if (!vessel.boat_locations || vessel.boat_locations.length === 0) {
+                            continue;
+                        }
+                        
+                        const [lng, lat] = vessel.boat_locations[0].point.coordinates;
+                        const link = `www.skipperi.fi${vessel.url}`;
+                        const [priceStr, currency] = vessel.prices.price.split(' ');
+                        let price = parseFloat(priceStr);
+                        
+                        if (currency === 'kr') {
+                            price *= 0.086; // Convert SEK to EUR
+                        }
+                        
+                        if (vessel.prices.type === 'week') {
+                            price = price / 7; // Convert to daily rate
+                        }
+                        
+                        const parsedVessel = {
+                            lat: lat,
+                            lng: lng,
+                            link: link,
+                            price: price,
+                            name: vessel.name || 'Sailing Boat',
+                            currency: currency,
+                            priceType: vessel.prices.type
+                        };
+                        
+                        results.push(parsedVessel);
+                    }
+                    
+                    console.log(`Processed page ${offset + 1}, found ${results.length} vessels so far`);
+                    offset++;
+                    
+                    // Add a small delay to avoid overwhelming the API
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                }
+                
+                console.log(`Total vessels loaded: ${results.length}`);
+                console.log(`Skipped (no price): ${skippedBecauseNoPrice}`);
+                
+                updateStatus(`✅ Loaded ${results.length} boats`, 'success');
+                
+                // Add all vessels to the map
+                addVesselsToMap(results);
+                  } catch (error) {
+                console.error('Error loading vessels:', error);
+                updateStatus(`❌ Error: ${error.message}`, 'error');
+            }
+        }
+        
+        // Function to add vessels to the map
+        function addVesselsToMap(vessels) {
+            // Clear existing vessel markers
+            vesselMarkers.forEach(marker => map.removeLayer(marker));
+            vesselMarkers = [];
+            
+            // Calculate price percentiles for color coding
+            const percentiles = getPricePercentiles(vessels);
+            
+            vessels.forEach(vessel => {
+                const color = getPriceColor(vessel.price, percentiles);
+                
+                const marker = L.marker([vessel.lat, vessel.lng], {
+                    icon: L.divIcon({
+                        className: 'custom-marker',
+                        html: `<div style="background-color: ${color}; width: 12px; height: 12px; border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3);"></div>`,
+                        iconSize: [16, 16],
+                        iconAnchor: [8, 8]
+                    })
+                })
+                .addTo(map)
+                .bindPopup(`
+                    <div style="font-family: Arial, sans-serif; min-width: 200px;">
+                        <h4 style="margin: 0 0 10px 0; color: #2c3e50; font-size: 16px;">${vessel.name}</h4>
+                        <p style="margin: 5px 0; font-size: 14px;">
+                            <strong>💰 Base price:</strong> €${vessel.price.toFixed(2)}/${vessel.priceType === 'week' ? 'day' : vessel.priceType}
+                        </p>
+                        <p style="margin: 5px 0; font-size: 12px; color: #666;">
+                            <strong>📍 Location:</strong> ${vessel.lat.toFixed(4)}, ${vessel.lng.toFixed(4)}
+                        </p>
+                        <p style="margin: 10px 0 0 0;">
+                            <a href="https://${vessel.link}" target="_blank" 
+                               style="color: #3498db; text-decoration: none; font-weight: bold; font-size: 14px;">
+                                🔗 View Details →
+                            </a>
+                        </p>
+                    </div>
+                `);
+                
+                vesselMarkers.push(marker);
+            });
+            
+            // Fit map to show all vessels if any were loaded
+            if (vesselMarkers.length > 0) {
+                const group = new L.featureGroup(vesselMarkers);
+                map.fitBounds(group.getBounds().pad(0.1));
+            }
+        }
+        
+        // Function to clear vessel markers only
+        function clearVesselMarkers() {
+            vesselMarkers.forEach(marker => map.removeLayer(marker));
+            vesselMarkers = [];
+            updateStatus('Vessel markers cleared', '');
+        }
+        
+        // Function to clear all markers
+        function clearAllMarkers() {
+            clickMarkers.forEach(marker => map.removeLayer(marker));
+            vesselMarkers.forEach(marker => map.removeLayer(marker));
+            clickMarkers = [];
+            vesselMarkers = [];
+            updateStatus('All markers cleared', '');
+        }
+          // Add scale control
+        L.control.scale().addTo(map);
+        
+        // Auto-load vessels when page loads
+        window.addEventListener('load', () => {
+            setTimeout(loadVessels, 1000); // Small delay to ensure everything is initialized
+        });
+    </script>
 </body>
 </html>
